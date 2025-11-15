@@ -1,9 +1,4 @@
 import React, { useState } from 'react'
-/* 新增：导入本地图片 */
-import spotPic1 from './pic/1.png'
-import spotPic2 from './pic/2.png'
-import spotPic9 from './pic/9.png'
-import spotPic3 from './pic/3.png'
 
 export interface Spot {
   id: string
@@ -11,7 +6,6 @@ export interface Spot {
   rating: number
   category: string
   price: number
-  image: string
 }
 
 const DEFAULT_SPOTS: Spot[] = [
@@ -20,16 +14,14 @@ const DEFAULT_SPOTS: Spot[] = [
     title: '港岛玩乐品尝',
     rating: 4.8,
     category: '港澳大地',
-    price: 200,
-    image: spotPic2,
+    price: 200
   },
   {
     id: 'spot-2',
     title: '千岛山山上日源泉',
     rating: 4.5,
     category: '活动大地',
-    price: 320,
-    image: spotPic9,
+    price: 320
   },
 ]
 
@@ -72,7 +64,6 @@ export default function FeaturedSpots() {
       <div className="featured-cards">
         {spots.map((spot) => (
           <div key={spot.id} className="featured-card">
-            <img src={spot.image} alt={spot.title} />
             <h3>{spot.title}</h3>
             <div className="rating">
               ⭐ {spot.rating} {spot.category} • 🏷️ {spot.price}
@@ -81,39 +72,6 @@ export default function FeaturedSpots() {
           </div>
         ))}
       </div>
-
-      {/* 用于演示的更新按钮（开发模式） */}
-      {process.env.NODE_ENV === 'development' && (
-        <button
-          className="btn-demo-update"
-          onClick={() => {
-            const mockNewSpots: Spot[] = [
-              {
-                id: 'spot-3',
-                title: '新增景点：维多利亚港夜景',
-                rating: 4.9,
-                category: '港澳体验',
-                price: 150,
-                // 使用本地图片
-                image: spotPic1,
-              },
-              {
-                id: 'spot-1',
-                title: '港岛玩乐品尝（已更新）',
-                rating: 4.8,
-                category: '港澳大地',
-                price: 200,
-                // 也使用本地图片作为示例
-                image: spotPic3,
-              },
-            ]
-            updateFeaturedSpots(mockNewSpots)
-          }}
-          disabled={loading}
-        >
-          {loading ? '更新中...' : '演示更新景点（开发模式）'}
-        </button>
-      )}
     </div>
   )
 }

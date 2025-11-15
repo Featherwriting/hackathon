@@ -139,10 +139,9 @@ def fetch_featured_spots(destination: str, interests: list[str]) -> dict:
         
         # 使用 LangChain DuckDuckGo 搜索工具
         search = DuckDuckGoSearchResults(
-            api_wrapper=DuckDuckGoSearchAPIWrapper(region="cn-zh", max_results=10)
+            api_wrapper=DuckDuckGoSearchAPIWrapper(region="cn-zh", max_results=30)
         )
         search_results_str = search.run(search_query)
-        
         if not search_results_str or search_results_str.strip() == "":
             print(f"[Tool] No search results, using fallback")
             raise RuntimeError("Search returned no results")
@@ -153,17 +152,31 @@ def fetch_featured_spots(destination: str, interests: list[str]) -> dict:
         print(f"[Tool] Got search results (length: {len(search_results_str)})")
         
         # 用 GPT 总结和整理搜索结果成景点列表
-        summary_prompt = f"""根据以下关于{destination}的搜索结果，提取出最受欢迎的景点或旅游地点。
+        summary_prompt = f"""
+你是一名专业旅游信息分析助手。请根据以下关于 {destination} 的搜索结果，提取出 **最符合用户兴趣的 16 个景点或旅游地点**。
 
+【用户兴趣】（请作为筛选和排序最重要的依据）：
+{interests}
+
+【搜索数据】：
 {search_context}
 
-请以 JSON 格式返回一个景点列表，每个景点包含：
-- title: 景点名称（中文）
-- category: 景点类型，如"景点"、"美食"、"购物"、"文化"等
-- rating: 推荐指数，4.0-5.0 之间的浮点数
-- description: 简短描述（一句话）
+【任务要求】：
+1. 从搜索内容中筛选与用户兴趣匹配度高的地点（最多 16 个， 最少 8 个）。
+2. 按“用户兴趣相关度 + 热度”进行排序。
+3. 将结果以 JSON 格式返回，包含字段：
+    - title：景点名称（中文）
+    - category：类型，如“景点”“美食”“文化”“购物”“自然”“建筑”等
+    - rating：推荐指数（4.0 至 5.0 间的小数）
+    - description：一句话描述该地点为何值得推荐
 
-返回格式：
+排序依据（按优先级从高到低）：
+   (1) 用户兴趣匹配度（最重要）  
+   (2) 热度／知名度  
+   (3) 搜索结果中出现频率  
+
+
+## 输出 JSON 示例（请保持完全相同结构）：
 {{
   "spots": [
     {{"title": "景点名", "category": "类型", "rating": 4.5, "description": "..."}},
@@ -171,7 +184,8 @@ def fetch_featured_spots(destination: str, interests: list[str]) -> dict:
   ]
 }}
 
-请最多提取8个景点，并按热度排序。"""
+请只输出 JSON，不要包含额外解释。
+"""
         
         response = client.chat.completions.create(
             model=MODEL_NAME,
