@@ -17,52 +17,23 @@ export interface SocialPost {
   platform?: string
 }
 
-const DEFAULT_POSTS: SocialPost[] = [
-  {
-    id: 'post-1',
-    title: '港澳美食探险',
-    image: pic2, // 使用 2.png
-    link: '#',
-    platform: 'xiaohongshu',
-  },
-  {
-    id: 'post-2',
-    title: '维港夜景打卡',
-    image: pic1, // 使用 1.png
-    link: '#',
-    platform: 'xiaohongshu',
-  },
-  {
-    id: 'post-3',
-    title: '迪士尼乐园攻略',
-    image: pic3, // 使用 3.png
-    link: '#',
-    platform: 'xiaohongshu',
-  },
-  {
-    id: 'post-4',
-    title: '购物街推荐',
-    image: pic4, // 使用 4.png
-    link: '#',
-    platform: 'xiaohongshu',
-  },
-  {
-    id: 'post-5',
-    title: '文化艺术展览',
-    image: pic5, // 使用 5.png
-    link: '#',
-    platform: 'xiaohongshu',
-  },
-]
+const DEFAULT_POSTS: SocialPost[] = []
 
 // 全局引用，用于外部更新社交媒体内容
-let globalUpdateSocialPosts: ((posts: SocialPost[]) => Promise<void>) | null = null
+type UpdateArg = SocialPost[] | ((prev: SocialPost[]) => SocialPost[])
+let globalUpdateSocialPosts: ((posts: UpdateArg, mode?: 'replace' | 'prepend' | 'append') => Promise<void>) | null = null
 
-export function updateSocialPosts(newPosts: SocialPost[]) {
+// 挂起队列：当组件尚未挂载时缓存更新请求
+const pendingUpdates: { posts: UpdateArg; mode: 'replace' | 'prepend' | 'append' }[] = []
+
+export function updateSocialPosts(newPosts: UpdateArg, mode: 'replace' | 'prepend' | 'append' = 'replace') {
   if (globalUpdateSocialPosts) {
-    return globalUpdateSocialPosts(newPosts)
+    return globalUpdateSocialPosts(newPosts, mode)
   }
-  console.warn('SocialMedia component not yet mounted')
+  // 组件未挂载，入队等待
+  pendingUpdates.push({ posts: newPosts, mode })
+  console.log('SocialMedia not mounted yet — queued update', { mode, queued: pendingUpdates.length })
+  return Promise.resolve()
 }
 
 export default function SocialMedia() {
@@ -71,12 +42,26 @@ export default function SocialMedia() {
 
   // 注册更新函数供外部调用
   React.useEffect(() => {
-    globalUpdateSocialPosts = async (newPosts: SocialPost[]) => {
+    globalUpdateSocialPosts = async (newPosts: UpdateArg, mode: 'replace' | 'prepend' | 'append' = 'replace') => {
       setLoading(true)
       try {
         // 模拟后端延迟
         await new Promise((resolve) => setTimeout(resolve, 300))
-        setPosts(newPosts)
+        setPosts((prev) => {
+          // 支持函数式更新
+          if (typeof newPosts === 'function') {
+            try {
+              return (newPosts as (p: SocialPost[]) => SocialPost[])(prev)
+            } catch (e) {
+              console.error('updateSocialPosts function threw', e)
+              return prev
+            }
+          }
+          const arr = newPosts as SocialPost[]
+          if (mode === 'replace') return arr
+          if (mode === 'prepend') return [...arr, ...prev]
+          return [...prev, ...arr]
+        })
         console.log('Social posts updated:', newPosts)
       } catch (err) {
         console.error('Failed to update social posts:', err)
@@ -84,6 +69,19 @@ export default function SocialMedia() {
         setLoading(false)
       }
     }
+    // 组件挂载后，立即应用任何挂起的更新
+    if (pendingUpdates.length) {
+      ;(async () => {
+        for (const u of pendingUpdates.splice(0)) {
+          try {
+            await globalUpdateSocialPosts?.(u.posts, u.mode)
+          } catch (e) {
+            console.error('Failed to apply queued social update', e)
+          }
+        }
+      })()
+    }
+
     return () => {
       globalUpdateSocialPosts = null
     }
@@ -91,16 +89,31 @@ export default function SocialMedia() {
 
   return (
     <div className="social-section">
-      <h4>联网视频</h4>
+      <h4>
+        B站视频
+        <span style={{ marginLeft: 8, fontSize: 12, color: '#888' }}>(BiliSearch 结果)</span>
+      </h4>
       <div className="social-posts">
-        {posts.map((post) => (
-          <a key={post.id} href={post.link} className="social-post-card">
-            <div className="post-image">
-              <img src={post.image} alt={post.title} />
-            </div>
-            <div className="post-title">{post.title}</div>
-          </a>
-        ))}
+        {posts.length === 0 ? (
+          <div style={{ padding: '12px 8px', color: '#666' }}>尚无 B 站搜索结果（请在聊天中指定目的地触发搜索）</div>
+        ) : (
+          posts.map((post) => (
+            <a key={post.id} href={post.link} className="social-post-card" target="_blank" rel="noopener noreferrer">
+              <div className="post-image">
+                <img src={post.image} alt={post.title} onError={(e) => { (e.target as HTMLImageElement).src = '/static/media/placeholder.png' }} />
+              </div>
+              <div className="post-title">
+                {post.title}
+                {post.platform === 'bilibili' && (
+                  <span style={{ marginLeft: 8, fontSize: 12, color: '#ff4d4f' }}>B站</span>
+                )}
+              </div>
+              { (post as any).playCount !== undefined && (
+                <div style={{ fontSize: 12, color: '#999', marginTop: 6 }}>{(post as any).playCount} 次播放</div>
+              )}
+            </a>
+          ))
+        )}
       </div>
 
       {/* 用于演示的更新按钮（开发模式） */}

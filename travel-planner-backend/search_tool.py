@@ -2,7 +2,7 @@ import re
 import json
 import hashlib
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from urllib.parse import urlparse
 
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper, RequestsWrapper
@@ -36,8 +36,16 @@ _KEYWORD_HITS = {
 _DATE_PAT = re.compile(r'(?:(\d{4})年)?\s*(\d{1,2})月\s*(\d{1,2})日?')
 
 def _now_cn():
-    # 以中国时区为准，避免跨月误判
-    return datetime.now(ZoneInfo("Asia/Shanghai"))
+    # 尝试以中国时区为准，避免跨月误判
+    try:
+        return datetime.now(ZoneInfo("Asia/Shanghai"))
+    except ZoneInfoNotFoundError:
+        # 在一些 Python 安装（尤其是 Windows/Anaconda）中可能缺少 IANA tzdata。
+        # 退回到 UTC 时间以保证程序继续运行；如果需要精确本地时间，请在环境中安装 tzdata。
+        try:
+            return datetime.now(ZoneInfo("UTC"))
+        except Exception:
+            return datetime.now()
 
 def _yyyymm_cn(dt: datetime) -> str:
     return f"{dt.year}年{dt.month}月"
@@ -97,7 +105,17 @@ def _extract_dates_zh(text: str, default_year: int) -> list:
         y = int(m.group(1)) if m.group(1) else default_year
         mon = int(m.group(2)); day = int(m.group(3))
         try:
-            dt = datetime(y, mon, day, tzinfo=ZoneInfo("Asia/Shanghai"))
+            try:
+                tz = ZoneInfo("Asia/Shanghai")
+            except ZoneInfoNotFoundError:
+                try:
+                    tz = ZoneInfo("UTC")
+                except Exception:
+                    tz = None
+            if tz is not None:
+                dt = datetime(y, mon, day, tzinfo=tz)
+            else:
+                dt = datetime(y, mon, day)
             dates.append(dt)
         except Exception:
             pass

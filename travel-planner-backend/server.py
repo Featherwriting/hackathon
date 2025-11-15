@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse
 from datetime import datetime
 import uuid
 import json
+import httpx
+from urllib.parse import quote
 from langgraph_agent import TravelPlanState, process_user_message
 
 # ====== 初始化 FastAPI 应用 ======
@@ -180,6 +182,64 @@ async def copilotkit_chat_handler(request: Request):
 async def health_check():
     """健康检查"""
     return {"status": "ok", "message": "Travel Planner Backend is running"}
+
+
+@app.get("/api/bili_search")
+async def bili_search(keyword: str, limit: int = 3):
+    """后端代理 B 站搜索，打印详细调试信息到服务器终端（CMD/PowerShell）。
+
+    返回格式：{"videos": [{id,title,pic,link,playCount}, ...]}
+    """
+    try:
+        if not keyword:
+            return JSONResponse({"videos": []})
+        url = f"https://api.bilibili.com/x/web-interface/search/type?keyword={quote(keyword)}&type=1&pn=1&ps={limit}"
+        print(f"[bili_proxy] Requesting Bilibili API URL: {url}")
+        # 使用浏览器风格的请求头尝试绕过简单的反爬检测
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Referer': 'https://www.bilibili.com',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
+        }
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=headers)
+            print(f"[bili_proxy] HTTP status: {resp.status_code} {resp.reason_phrase}")
+            text_snippet = resp.text[:2000]
+            print(f"[bili_proxy] Raw response snippet: {text_snippet}")
+            if resp.status_code != 200:
+                # 返回错误信息，前端可据此显示友好提示
+                return JSONResponse({"videos": [], "error": {"status": resp.status_code, "snippet": text_snippet[:800]}}, status_code=200)
+            j = resp.json()
+
+        # 尝试解析常见字段
+        candidates = []
+        if isinstance(j, dict):
+            data = j.get("data") or {}
+            candidates = data.get("result") or data.get("vlist") or []
+
+        videos = []
+        for it in (candidates or []):
+            bvid = it.get("bvid") or it.get("id") or (str(it.get("aid")) if it.get("aid") else None)
+            title = it.get("title") or it.get("name") or ""
+            # 去标签
+            try:
+                import re
+                title = re.sub(r"<[^>]+>", "", title)
+            except Exception:
+                pass
+            pic = it.get("pic") or it.get("cover") or ""
+            stat = it.get("stat") or {}
+            play = stat.get("view") or stat.get("play") or it.get("play") or it.get("playCount") or 0
+            link = f"https://www.bilibili.com/video/{bvid}" if bvid else (it.get("url") or "")
+            videos.append({"id": str(bvid or ""), "title": title, "pic": pic, "link": link, "playCount": int(play or 0)})
+
+        videos = sorted(videos, key=lambda x: x.get("playCount", 0), reverse=True)[:limit]
+        print(f"[bili_proxy] Parsed videos: {videos}")
+        return JSONResponse({"videos": videos})
+    except Exception as e:
+        print(f"[bili_proxy] Error: {e}")
+        return JSONResponse({"videos": []})
 
 
 def main():
