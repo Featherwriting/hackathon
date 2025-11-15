@@ -9,12 +9,7 @@ import { useFrontendActionsSetup } from './hooks/useFrontendActionsSetup.ts'
 import { useCopilotResponseInterceptor } from './hooks/useCopilotResponseInterceptor.ts'
 
 const CHAT_SUGGESTIONS = [
-  { title: '查询评价', message: '查询景点评价' },
-  { title: '获取推荐', message: '给我推荐景点' },
-  { title: '行程规划', message: '帮我规划3天行程' },
-  { title: '美食推荐', message: '推荐当地美食' },
-  { title: '交通方式', message: '景点间的交通方式' },
-  { title: '预算估算', message: '估算行程预算' },
+  { title: '查询评价', message: '媒体评分' },
 ]
 
 export default function App() {

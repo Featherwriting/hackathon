@@ -212,7 +212,7 @@ def analyze_xiaohongshu_media_score(spot_name: str, city: str = "") -> Dict:
     print(f"[XHS Analyzer] Analyzing '{spot_name}' in '{city}'")
     
     # 构建查询
-    query = f"{city} {spot_name}" if city else spot_name
+    query = f"{spot_name}" 
     
     # 搜索相关文章
     relevant_notes = _search_relevant_notes(query, top_k=10)
@@ -238,13 +238,13 @@ def analyze_xiaohongshu_media_score(spot_name: str, city: str = "") -> Dict:
     context = _format_notes_for_llm(relevant_notes, comments)
     
     # 使用 LLM 生成分析报告
-    system_prompt = """你是一个专业的旅游与餐饮评价分析师。你的任务是根据小红书文章和用户评论，生成综合评分报告。
-
+    system_prompt = """你是一个专业的旅游与餐饮评价分析师。你的任务是根据小红书文章和用户评论，生成目标地点的综合评分报告。
+    报告一定围绕文章与评论对目标地点的评价展开，请尽量避免说总结性的废话，请描述更加具体，可以使用”有人评价...“、“部分用户提到...”等表达方式。
 请分析以下内容并以 JSON 格式返回结果：
 - rating: 综合评分（1-5分，小数）
 - summary: 一句话总结（50字内）
-- highlights: 3-5个亮点（数组，每个10-20字）
-- concerns: 2-3个注意事项或不足（数组，每个10-20字，如果没有负面评价可为空）
+- highlights: 1-3个亮点（数组，每个10-20字）
+- concerns: 1-3个注意事项或不足（数组，每个10-20字，如果没有负面评价可为空）
 
 只返回 JSON，不要其他文字。"""
     
@@ -268,13 +268,14 @@ def analyze_xiaohongshu_media_score(spot_name: str, city: str = "") -> Dict:
         result_text = response.choices[0].message.content
         analysis = json.loads(result_text)
         
-        # 提取热门文章链接（使用实际的 note_url 字段）
+        # 只提取最相关的1篇文章（相关性评分最高的）
         top_articles = []
-        for note in relevant_notes[:3]:
-            note_id = note.get("note_id", "")
-            title = note.get("title", "无标题")
+        if relevant_notes:
+            most_relevant = relevant_notes[0]  # 已经按 _relevance_score 排序
+            note_id = most_relevant.get("note_id", "")
+            title = most_relevant.get("title", "无标题")
             # 使用实际的 note_url 字段，如果没有则构造
-            url = note.get("note_url", f"https://www.xiaohongshu.com/explore/{note_id}")
+            url = most_relevant.get("note_url", f"https://www.xiaohongshu.com/explore/{note_id}")
             top_articles.append({
                 "title": title,
                 "url": url,
@@ -345,11 +346,11 @@ def format_analysis_for_user(analysis: Dict) -> str:
             msg += f"{i}. {concern}\n"
     
     if articles:
-        msg += "\n🔗 参考文章：\n"
-        for article in articles:
-            title = article["title"]
-            url = article["url"]
-            msg += f"• {title}\n  {url}\n"
+        msg += "\n🔗 最相关文章：\n"
+        article = articles[0]  # 只显示最相关的一篇
+        title = article["title"]
+        url = article["url"]
+        msg += f"• {title}\n  {url}\n"
     
     msg += f"\n（基于 {analysis['article_count']} 篇文章和 {analysis['comment_count']} 条评论分析）"
     

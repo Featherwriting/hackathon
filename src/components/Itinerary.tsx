@@ -147,61 +147,7 @@ export default function Itinerary() {
         </div>
       ))}
 
-      {/* 用于演示的更新按钮（开发模式） */}
-      {process.env.NODE_ENV === 'development' && (
-        <button
-          className="btn-demo-update-itinerary"
-          onClick={() => {
-            const mockNewPlans: DayPlan[] = [
-              {
-                id: 'day-1',
-                day: 'Day 1',
-                activities: [
-                  {
-                    id: 'a1-1',
-                    icon: '🗺️',
-                    title: '旺角太阳（已更新）',
-                    time: '09:00 - 12:15 | 约3小时',
-                    description: '更新后的旺角体验，新增特色购物路线。',
-                  },
-                  {
-                    id: 'a1-2',
-                    icon: '🍽️',
-                    title: '米其林餐厅',
-                    time: '13:00 - 15:00 | 约2小时',
-                    description: '享受米其林星级美食，品尝顶级烹饪艺术。',
-                  },
-                  {
-                    id: 'a1-3',
-                    icon: '🎭',
-                    title: '文化表演',
-                    time: '19:00 - 21:00 | 约2小时',
-                    description: '欣赏传统文化表演，体验香港艺术魅力。',
-                  },
-                ],
-              },
-              {
-                id: 'day-2',
-                day: 'Day 2',
-                activities: [
-                  {
-                    id: 'a2-1',
-                    icon: '🏖️',
-                    title: '沙滩休闲',
-                    time: '08:00 - 12:00 | 约4小时',
-                    description: '在美丽沙滩放松身心，享受阳光和海风。',
-                  },
-                ],
-              },
-            ]
-            updateItinerary(mockNewPlans)
-          }}
-          disabled={loading}
-          style={{ marginTop: '12px' }}
-        >
-          {loading ? '更新中...' : '演示更新行程（开发模式）'}
-        </button>
-      )}
+      
     </div>
   )
 }

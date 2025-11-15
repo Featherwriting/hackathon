@@ -1,4 +1,4 @@
-"""
+﻿"""
 LangGraph-based Travel Planning Agent
 智能旅行规划 Agent，能够逐步询问用户需求并生成动态行程计划
 """
@@ -33,8 +33,11 @@ class TravelPlanState(TypedDict):
     itinerary: dict  # 生成的行程计划
     featured_spots: list[dict]  # 推荐景点
     city_hotspots: list[dict]  # 城市最新热点/活动
-    current_phase: str  # 当前对话阶段（greeting/gathering_info/generating_plan/refining）
+    current_phase: str  # 当前对话阶段（greeting/gathering_info/generating_day/refining_day/completed）
     info_complete: bool  # 是否获取了足够的信息
+    current_day_index: int  # 当前正在生成/改进的天数索引（0-based）
+    day_approved: bool  # 当前天的行程是否已被用户确认满意
+    sorted_spots: list[dict]  # 预处理后的景点列表（用于逐天分配）
 
 
 # ====== 行程规划辅助函数（智能版） ======
@@ -685,12 +688,10 @@ def node_gather_info(state: TravelPlanState) -> TravelPlanState:
 
     # 先检查信息是否已完整，若完整则直接跳到生成阶段
     if should_generate_plan(state):
-        print("[Node] Info complete, transitioning to generate plan...")
-        state["current_phase"] = "generating_plan"
+        print("[Node] Info complete, transitioning to day-by-day planning...")
+        state["current_phase"] = "generating_day"
         state["info_complete"] = True
-        # 添加一个简短的过渡消息，然后在同一次请求里调用 node_generate_plan
-        transition_message = "好的，信息已收集完成！正在为您生成行程计划..."
-        state["messages"].append({"role": "assistant", "content": transition_message})
+        # 不添加过渡消息，让 node_initialize_planning 来生成欢迎消息
         return state
 
     # 信息不完整，继续询问用户
@@ -723,17 +724,17 @@ def node_gather_info(state: TravelPlanState) -> TravelPlanState:
     return state
 
 
-def node_generate_plan(state: TravelPlanState) -> TravelPlanState:
+def node_initialize_planning(state: TravelPlanState) -> TravelPlanState:
     """
-    生成行程计划阶段
+    初始化行程规划：获取景点和热点数据，准备逐天生成
     """
-    print("[Node] Generating travel plan...")
+    print("[Node] Initializing travel planning...")
 
-    # 调用工具先获取景点，再根据景点生成行程，保证行程中包含被推荐的景点
     destination = state.get("destination", "香港")
     days = state.get("days", 3)
     interests = state.get("interests", ["景点"])
     budget = state.get("budget", "中")
+    people = state.get("people_count", 1)
 
     # 先获取推荐景点（网络搜索或回退）
     spots_result = fetch_featured_spots(destination, interests)
@@ -744,49 +745,162 @@ def node_generate_plan(state: TravelPlanState) -> TravelPlanState:
     hotspots_result = search_city_hotspots(destination)
     state["city_hotspots"] = hotspots_result.get("hotspots", [])
 
-    # 再生成行程，并把 featured_spots 传入以便嵌入到每日活动
-    itinerary_result = generate_itinerary(destination, days, interests, budget, featured_spots=featured)
-    state["itinerary"] = itinerary_result
+    # 预处理景点列表（打分、排序、控制兴趣比例）
+    sorted_spots = _score_and_sort_spots(featured, interests, budget)
+    sorted_spots = _apply_interest_ratio(sorted_spots, interests, max_interest_ratio=0.6)
+    state["sorted_spots"] = sorted_spots
 
-    # 生成总结消息
-    destination = state.get("destination", "未知")
-    days = state.get("days", 0)
-    people = state.get("people_count", 1)
-    interests_str = ",".join(state.get("interests", [])) or "多样化"
+    # 初始化行程结构
+    state["itinerary"] = {"plans": []}
+    state["current_day_index"] = 0
+    state["day_approved"] = False
 
-    plan_summary = f"""
-我已经为您准备好了完整的行程计划！
+    # 生成欢迎消息
+    interests_str = ",".join(interests) or "多样化"
+    welcome_message = f"""
+太好了！我已经为您收集了 {destination} 的热门景点和最新活动信息。
 
-目的地：{destination}
-天数：{days}天
-人数：{people}人
-兴趣：{interests_str}
+📋 您的旅行概况：
+• 目的地：{destination}
+• 天数：{days}天
+• 人数：{people}人
+• 兴趣：{interests_str}
+• 预算：{budget}
 
-我已经生成了每日详细的活动安排和热门景点推荐。这份行程根据您的偏好进行了定制化设计。
-您可以在页面右侧看到"行程计划"和"热门景点"的更新。
+✨ 我找到了 {len(featured)} 个推荐景点和 {len(state.get('city_hotspots', []))} 个热点活动。
 
-此外，我也为您整理了近期的城市热点活动，供您参考与选择，您可随时让我把某个热点加入行程或移除。排名已经按热度排序。
+接下来我将**逐天**为您规划行程。每规划完一天，您可以提出修改意见，满意后我们再继续下一天的安排。
 
-如果您想调整行程的某个部分（比如改变某一天的活动，或者添加/删除景点），请告诉我！
+现在让我为您规划第 1 天的行程...
 """
 
     messages = state.get("messages", [])
-    messages.append({"role": "assistant", "content": plan_summary})
+    messages.append({"role": "assistant", "content": welcome_message})
     state["messages"] = messages
-    state["current_phase"] = "refining"
+    state["current_phase"] = "generating_day"
 
     return state
 
 
-def node_refine_plan(state: TravelPlanState) -> TravelPlanState:
+def node_generate_single_day(state: TravelPlanState) -> TravelPlanState:
     """
-    根据用户反馈调整行程
+    生成单天行程计划
+    """
+    current_day = state.get("current_day_index", 0)
+    total_days = state.get("days", 3)
+    
+    print(f"[Node] Generating day {current_day + 1} of {total_days}...")
+
+    destination = state.get("destination", "香港")
+    interests = state.get("interests", ["景点"])
+    budget = state.get("budget", "中")
+    sorted_spots = state.get("sorted_spots", [])
+
+    # 计算当前天应该分配哪些景点
+    # 简单策略：将景点平均分配到每一天
+    spots_per_day = len(sorted_spots) // total_days if total_days > 0 else 0
+    start_idx = current_day * spots_per_day
+    end_idx = start_idx + spots_per_day
+    
+    # 最后一天拿剩余所有景点
+    if current_day == total_days - 1:
+        end_idx = len(sorted_spots)
+    
+    day_spots = sorted_spots[start_idx:end_idx] if sorted_spots else []
+
+    # 生成当天的活动时间表
+    activities = _build_day_timeline(
+        day_index=current_day,
+        destination=destination,
+        spots_for_day=day_spots,
+        budget=budget
+    )
+    
+    summary_info = _build_day_theme_summary(day_spots, destination)
+
+    # 构造单天计划
+    day_plan = {
+        "id": f"day_{current_day + 1}",
+        "day": f"Day {current_day + 1}",
+        "summary": summary_info["summary"],
+        "meta": {
+            "total_hours": summary_info["total_hours"],
+            "theme": summary_info["theme"],
+            "highlights": summary_info["highlights"],
+        },
+        "activities": activities
+    }
+
+    # 更新 itinerary（只包含已生成的天数）
+    current_itinerary = state.get("itinerary", {"plans": []})
+    plans = current_itinerary.get("plans", [])
+    
+    # 如果是重新生成当天，替换；否则追加
+    if current_day < len(plans):
+        plans[current_day] = day_plan
+    else:
+        plans.append(day_plan)
+    
+    state["itinerary"] = {"plans": plans}
+
+    # 生成提示消息
+    day_message = f"""
+📅 **Day {current_day + 1} 行程规划**
+
+{summary_info['summary']}
+
+我为您安排了 {len(activities)} 个活动，包括：
+"""
+    
+    for i, act in enumerate(activities[:3], 1):  # 只展示前3个活动
+        day_message += f"{i}. {act['icon']} {act['title']} ({act['time']})\n"
+    
+    if len(activities) > 3:
+        day_message += f"...以及其他 {len(activities) - 3} 个活动\n"
+    
+    day_message += f"""
+您可以在右侧看到完整的 Day {current_day + 1} 安排。
+
+💬 如果您想调整这一天的行程（比如更换景点、调整时间等），请告诉我！
+✅ 如果您对这天的安排满意，请说"满意了"或"下一天"，我将继续规划下一天。
+"""
+
+    messages = state.get("messages", [])
+    messages.append({"role": "assistant", "content": day_message})
+    state["messages"] = messages
+    state["current_phase"] = "refining_day"
+    state["day_approved"] = False
+
+    return state
+
+
+# 保留向后兼容的空函数（旧代码可能还在引用）
+def node_generate_plan(state: TravelPlanState) -> TravelPlanState:
+    """已废弃：请使用 node_initialize_planning 和 node_generate_single_day"""
+    print("[DEPRECATED] node_generate_plan called, redirecting to new flow...")
+    state = node_initialize_planning(state)
+    if state.get("current_phase") == "generating_day":
+        state = node_generate_single_day(state)
+    return state
+
+
+def node_refine_plan(state: TravelPlanState) -> TravelPlanState:
+    """已废弃：请使用 node_refine_day"""
+    print("[DEPRECATED] node_refine_plan called, redirecting to node_refine_day...")
+    return node_refine_day(state)
+
+
+def node_refine_day(state: TravelPlanState) -> TravelPlanState:
+    """
+    根据用户反馈调整当前天的行程，或确认进入下一天
     
     新增功能：检测"媒体评分"关键词，触发小红书分析
     """
-    print("[Node] Refining travel plan...")
+    print("[Node] Refining current day plan...")
 
     messages = state.get("messages", [])
+    current_day = state.get("current_day_index", 0)
+    total_days = state.get("days", 3)
 
     # 提取用户最后的调整请求
     last_user_msg = ""
@@ -795,36 +909,93 @@ def node_refine_plan(state: TravelPlanState) -> TravelPlanState:
             last_user_msg = msg.get("content", "")
             break
 
+    # ====== 检测用户是否满意当前天的安排 ======
+    satisfaction_keywords = ["满意", "下一天", "下一个", "继续", "可以了", "没问题", "好的", "next", "ok"]
+    is_satisfied = any(keyword in last_user_msg.lower() for keyword in satisfaction_keywords)
+    
+    if is_satisfied and len(last_user_msg) < 20:  # 简短的确认消息
+        state["day_approved"] = True
+        state["current_day_index"] = current_day + 1
+        
+        # 检查是否所有天数都已完成
+        if current_day + 1 >= total_days:
+            # 所有行程已完成
+            completion_message = f"""
+🎉 太棒了！您的 {total_days} 天行程规划已全部完成！
+
+您可以在右侧查看完整的行程安排。如果还需要调整任何一天的内容，请随时告诉我（例如"修改第2天"）。
+
+您也可以：
+• 查看某个景点的小红书媒体评分（说"媒体评分"）
+• 添加城市热点活动到行程中
+• 调整任意一天的具体安排
+
+祝您旅途愉快！✈️
+"""
+            messages.append({"role": "assistant", "content": completion_message})
+            state["messages"] = messages
+            state["current_phase"] = "completed"
+            return state
+        else:
+            # 继续生成下一天
+            transition_message = f"太好了！Day {current_day + 1} 的安排已确认。现在让我为您规划 Day {current_day + 2}..."
+            messages.append({"role": "assistant", "content": transition_message})
+            state["messages"] = messages
+            state["current_phase"] = "generating_day"
+            return state
+
     # ====== 新增：检测"媒体评分"关键词 ======
     if "媒体评分" in last_user_msg or "小红书评分" in last_user_msg or "社交媒体评价" in last_user_msg:
         print("[Node] Detected media rating request, analyzing Xiaohongshu...")
         
         destination = state.get("destination", "香港")
         current_itinerary = state.get("itinerary", {})
+        plans = current_itinerary.get("plans", [])
         
-        # 提取当前行程中的景点和餐厅
+        # 提取当天行程中的所有景点和餐厅
         spots_to_analyze = []
         
-        # 从 featured_spots 中提取（更全面）
-        featured_spots = state.get("featured_spots", [])
-        for spot in featured_spots[:5]:  # 分析前5个热门景点
-            title = spot.get("title", "")
-            category = spot.get("category", "")
-            if title and ("景点" in category or "美食" in category or "餐厅" in category):
-                spots_to_analyze.append(title)
+        # 获取当前天的计划
+        if current_day < len(plans):
+            current_day_plan = plans[current_day]
+            activities = current_day_plan.get("activities", [])
+            
+            print(f"[Node] Extracting spots from Day {current_day + 1} with {len(activities)} activities")
+            
+            # 从当天的活动中提取所有景点/餐厅
+            for activity in activities:
+                title = activity.get("title", "").strip()
+                icon = activity.get("icon", "")
+                
+                # 过滤掉通用活动（午餐、自由活动、休息等）
+                generic_keywords = [
+                    "当地午餐", "自由活动", "咖啡小憩", "街头漫步", 
+                    "精致晚餐", "夜市", "街头小吃", "夜景", "休息"
+                ]
+                
+                # 只保留具体的景点/餐厅名称
+                is_generic = any(keyword in title for keyword in generic_keywords)
+                is_generic = is_generic or title.startswith(destination)
+                
+                if title and not is_generic and len(title) > 2:
+                    # 清理标题中的城市名前缀
+                    cleaned_title = title.replace(destination, "").strip()
+                    if cleaned_title and cleaned_title not in spots_to_analyze:
+                        spots_to_analyze.append(cleaned_title if len(cleaned_title) > 2 else title)
+                        print(f"[Node] Added spot for analysis: {cleaned_title if len(cleaned_title) > 2 else title}")
         
-        # 如果没有找到，从 itinerary 的 activities 中提取
+        # 如果当天没有找到景点，提示用户
         if not spots_to_analyze:
-            for plan in current_itinerary.get("plans", [])[:2]:  # 只分析前2天
-                for activity in plan.get("activities", []):
-                    title = activity.get("title", "")
-                    if title and title not in [f"{destination} 当地午餐", f"{destination} 自由活动"]:
-                        spots_to_analyze.append(title)
+            assistant_message = f"抱歉，Day {current_day + 1} 的行程中暂未找到具体的景点或餐厅名称。\n\n请先生成或完善当天的行程安排，或者您可以直接告诉我想了解哪个景点/餐厅的评分。"
+            messages.append({"role": "assistant", "content": assistant_message})
+            state["messages"] = messages
+            return state
         
-        # 分析每个景点/餐厅的小红书评分
+        # 分析当天所有景点/餐厅的小红书评分
         analysis_results = []
-        for spot_name in spots_to_analyze[:3]:  # 最多分析3个地点
+        for spot_name in spots_to_analyze:
             try:
+                print(f"[Node] Analyzing: {spot_name}")
                 analysis = analyze_xiaohongshu_media_score(spot_name, destination)
                 if analysis.get("success"):
                     formatted_text = format_analysis_for_user(analysis)
@@ -835,47 +1006,51 @@ def node_refine_plan(state: TravelPlanState) -> TravelPlanState:
         
         # 生成综合回复
         if analysis_results:
-            assistant_message = "📱 小红书媒体评分分析报告\n\n"
-            assistant_message += "根据您当前行程中的景点/餐厅，我为您整理了小红书上的用户评价和评分：\n\n"
+            assistant_message = f"📱 小红书媒体评分分析报告 - Day {current_day + 1}\n\n"
+            assistant_message += f"我为您分析了当天行程中的 {len(analysis_results)} 个景点/餐厅：\n\n"
             assistant_message += "\n\n---\n\n".join(analysis_results)
-            assistant_message += "\n\n如需查看更多地点的媒体评分，或者根据这些评分调整行程，请告诉我！"
+            assistant_message += "\n\n💡 如果某个地点的评分不理想，我可以帮您调整行程，换成其他推荐景点！"
         else:
-            assistant_message = "抱歉，暂未找到相关景点/餐厅的小红书评价数据。您可以指定具体的景点名称，我会为您搜索分析。"
+            assistant_message = f"抱歉，未能找到 Day {current_day + 1} 行程中这些地点的小红书评价数据：{', '.join(spots_to_analyze)}\n\n这可能是因为景点名称较为通用。您可以告诉我具体的景点名称，我会为您搜索分析。"
         
         messages.append({"role": "assistant", "content": assistant_message})
         state["messages"] = messages
         return state
     
-    # ====== 原有行程调整逻辑 ======
-    # 获取当前的行程和景点数据
+    # ====== 当前天行程调整逻辑 ======
     current_itinerary = state.get("itinerary", {})
-    current_spots = state.get("featured_spots", [])
     destination = state.get("destination", "未知")
-    days = state.get("days", 3)
     interests = state.get("interests", ["景点"])
+    
+    # 获取当前天的计划
+    plans = current_itinerary.get("plans", [])
+    current_day_plan = plans[current_day] if current_day < len(plans) else None
 
-    # 使用 GPT 分析用户的调整需求并生成新的行程
-    system_prompt = f"""你是一个专业的旅行规划助手。用户已经看到了他们的行程计划，现在想要调整。
+    if not current_day_plan:
+        assistant_message = "抱歉，当前天的行程还未生成。请稍后再试。"
+        messages.append({"role": "assistant", "content": assistant_message})
+        state["messages"] = messages
+        return state
 
-当前行程信息：
+    # 使用 GPT 分析用户的调整需求并生成新的单天行程
+    system_prompt = f"""你是一个专业的旅行规划助手。用户正在查看 Day {current_day + 1} 的行程，想要进行调整。
+
+当前 Day {current_day + 1} 的安排：
 - 目的地：{destination}
-- 天数：{days}天
 - 兴趣：{", ".join(interests)}
-- 当前行程有 {len(current_itinerary.get("plans", []))} 天的安排
+- 当前活动数：{len(current_day_plan.get('activities', []))}
+- 主题：{current_day_plan.get('meta', {}).get('theme', '未知')}
 
 用户的调整请求：{last_user_msg}
 
-请分析用户想要如何调整（例如：改变某天的活动、添加/删除景点、调整时间安排等）。
-然后以 JSON 格式返回调整后的完整行程计划，格式为：
+请分析用户想要如何调整这一天的行程（例如：更换景点、调整时间、添加/删除活动等）。
+然后以 JSON 格式返回调整后的 **Day {current_day + 1}** 计划，格式为：
 {{
-  "plans": [
-    {{
-      "id": "day_1",
-      "day": "Day 1",
-      "activities": [
-        {{"id": "act_1_morning", "icon": "🗺️", "title": "活动名称", "time": "08:00 - 12:00", "description": "活动描述"}}
-      ]
-    }}
+  "id": "day_{current_day + 1}",
+  "day": "Day {current_day + 1}",
+  "summary": "约X小时·主题：...",
+  "activities": [
+    {{"id": "act_1", "icon": "🗺️", "title": "活动名称", "time": "08:00 - 12:00", "description": "活动描述"}}
   ]
 }}
 
@@ -902,22 +1077,24 @@ def node_refine_plan(state: TravelPlanState) -> TravelPlanState:
             # 如果 GPT 表示不需要修改
             if parsed.get("no_change"):
                 print("[Node] No itinerary change needed")
-                assistant_message = "好的，我明白了。如果您需要调整行程的具体部分，请告诉我您想改变哪一天或哪个活动。"
+                assistant_message = f"好的，我明白了。Day {current_day + 1} 的当前安排保持不变。如果您满意了，请说'满意了'或'下一天'继续规划。"
             else:
-                # 更新 state 中的 itinerary
-                if "plans" in parsed:
-                    state["itinerary"] = parsed
-                    print(f"[Node] Updated itinerary with {len(parsed['plans'])} days")
-                    assistant_message = "好的，我已经根据您的要求调整了行程计划。您可以在右侧看到更新后的行程安排。如果还需要进一步调整，请随时告诉我！"
+                # 更新 state 中当前天的 itinerary
+                if "activities" in parsed:
+                    # 更新当前天的计划
+                    plans[current_day] = parsed
+                    state["itinerary"] = {"plans": plans}
+                    print(f"[Node] Updated Day {current_day + 1} itinerary")
+                    assistant_message = f"好的，我已经根据您的要求调整了 Day {current_day + 1} 的行程。您可以在右侧看到更新后的安排。\n\n如果满意，请说'满意了'或'下一天'继续规划下一天！"
                 else:
-                    assistant_message = "我理解了您的需求，但需要更具体的信息才能调整行程。请告诉我您想改变哪一天或哪个活动。"
+                    assistant_message = f"我理解了您的需求，但需要更具体的信息才能调整 Day {current_day + 1}。请告诉我您想改变哪个活动或景点。"
         else:
             # JSON 解析失败，给出友好回复
-            assistant_message = "我理解您想调整行程。请具体告诉我您想修改哪一天的安排，或者想添加/删除哪些景点，我会为您更新。"
+            assistant_message = f"我理解您想调整 Day {current_day + 1} 的行程。请具体告诉我您想修改什么，我会为您更新。"
 
     except Exception as e:
         print(f"[Node] Refine error: {e}")
-        assistant_message = "抱歉，我在处理您的调整请求时遇到了问题。请再详细描述一下您想如何修改行程？"
+        assistant_message = "抱歉，我在处理您的调整请求时遇到了问题。请再详细描述一下您想如何修改这天的行程？"
 
     messages.append({"role": "assistant", "content": assistant_message})
     state["messages"] = messages
@@ -1054,13 +1231,29 @@ def process_user_message(user_message: str, state: TravelPlanState) -> tuple[Tra
         state = node_greeting(state)
     elif current_phase == "gathering_info":
         state = node_gather_info(state)
-        # 关键点：如果在 gather_info 中已经把 info 补全，并把 current_phase 设成 generating_plan，
-        # 在同一次请求里立刻生成行程，避免“慢一步”的问题
-        if state.get("current_phase") == "generating_plan":
-            state = node_generate_plan(state)
+        # 关键点：如果在 gather_info 中已经把 info 补全，立刻初始化规划
+        if state.get("current_phase") == "generating_day":
+            state = node_initialize_planning(state)
+            # 初始化后立即生成第一天
+            if state.get("current_phase") == "generating_day":
+                state = node_generate_single_day(state)
+    elif current_phase == "generating_day":
+        # 生成当前天的行程
+        state = node_generate_single_day(state)
+    elif current_phase == "refining_day":
+        # 改进当前天的行程
+        state = node_refine_day(state)
+        # 如果用户确认满意，phase 会变成 generating_day，需要生成下一天
+        if state.get("current_phase") == "generating_day":
+            state = node_generate_single_day(state)
+    elif current_phase == "completed":
+        # 所有行程已完成，继续处理后续请求（如媒体评分、调整等）
+        state = node_refine_day(state)
     elif current_phase == "generating_plan":
+        # 向后兼容：旧的 generating_plan 阶段
         state = node_generate_plan(state)
     elif current_phase == "refining":
+        # 向后兼容：旧的 refining 阶段
         state = node_refine_plan(state)
 
     # 获取最新的 AI 响应
