@@ -27,13 +27,11 @@ body {
   background: white;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
-  flex-shrink: 0;
+  /* Use flex column so internal areas can grow and scroll */
   display: flex;
   flex-direction: column;
-  height: 90vh;
-  position: relative; /* 允许内部元素绝对定位到聊天区域底部 */
-  padding-bottom: 88px; /* 为输入区与 powered-by 预留空间，可根据需要调整 */
+  flex-shrink: 0;
+  min-height: 0; /* allow children to shrink for proper scrolling */
 }
 
 /* 右边：内容区域 */
@@ -619,6 +617,68 @@ body {
   overflow-y: auto;
 }
 
+/* 新的分页控件样式 */
+.pagination-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+  padding: 12px 16px;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  background: #fafafa;
+}
+
+.page-btn {
+  padding: 8px 14px;
+  background: #0066ff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.25s ease, transform 0.25s ease;
+}
+
+.page-btn:hover:not(:disabled) {
+  background: #0052cc;
+  transform: translateY(-2px);
+}
+
+.page-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  color: #f5f5f5;
+}
+
+.page-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.page-dot {
+  width: 10px;
+  height: 10px;
+  background: #d0d0d0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  position: relative;
+}
+
+.page-dot.active {
+  background: #0066ff;
+  box-shadow: 0 0 0 4px rgba(0, 102, 255, 0.15);
+}
+
+.page-dot:hover:not(.active) {
+  background: #999;
+}
+
 /* 修改 .chat-section：允许内部绝对定位并预留底部空间，避免输入区被内容遮挡 */
 .chat-section {
   position: relative; /* 允许内部元素绝对定位到聊天区域底部 */
@@ -635,6 +695,24 @@ body {
   box-sizing: border-box;
   padding: 8px 12px;
   background: transparent; /* 保持原始样式，如需遮挡可修改 */
+}
+
+/* Make common CopilotKit message container classes scrollable inside the chat column.
+   These cover several possible internal class names the CopilotKit UI might use. */
+.chat-section .copilotKitConversation,
+.chat-section .copilotKitContent,
+.chat-section .copilotKitMessages,
+.chat-section .copilot-chat-messages,
+.chat-section .copilotkit-messages,
+.chat-section .messages {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Ensure any direct child wrapper also allows scrolling */
+.chat-section > * {
+  min-height: 0;
 }
 
 

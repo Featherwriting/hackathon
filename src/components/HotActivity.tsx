@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 
 interface Activity {
   id: string
@@ -6,19 +6,6 @@ interface Activity {
   link: string
   hot?: boolean
 }
-
-interface Category {
-  id: string
-  label: string
-}
-
-const CATEGORIES: Category[] = [
-  { id: 'popular', label: '美食盛宴' },
-  { id: 'holiday', label: '节日热门' },
-  { id: 'ai', label: 'AI推荐' },
-  { id: 'shopping', label: '购物狂欢' },
-  { id: 'event', label: '赛事活动' },
-]
 
 // 本地初始数据（作为兜底）
 const LOCAL_ACTIVITIES_BY_CATEGORY: Record<string, Activity[]> = {
@@ -51,66 +38,47 @@ const LOCAL_ACTIVITIES_BY_CATEGORY: Record<string, Activity[]> = {
   ],
 }
 
+// 保留后端基址（暂不调用）
 const BASE_API = 'http://localhost:5000/api'
 
-// 前端分类 id -> 后端 categoryCode 映射:contentReference[oaicite:4]{index=4}
-const CATEGORY_CODE_MAP: Record<string, string> = {
-  popular: 'ai_recommend',
-  holiday: 'festival',
-  ai: 'ai_recommend',
-  shopping: 'shopping',
-  event: 'sports',
+// 将所有本地活动合并成一个列表，便于前端分页
+const MERGED_LOCAL_ACTIVITIES: Activity[] = Object.values(LOCAL_ACTIVITIES_BY_CATEGORY).flat()
+
+let externalSetter: ((items: Activity[]) => void) | null = null
+export function updateHotActivities(items: Activity[]) {
+  if (externalSetter) {
+    externalSetter(items)
+  }
 }
 
+// 在 window 注入供全局调用（被前端动作封装）
+// @ts-ignore
+if (typeof window !== 'undefined') window.__updateHotActivities = updateHotActivities
+
 export default function HotActivity() {
-  const [activeCategory, setActiveCategory] = useState('popular')
-  const [activities, setActivities] = useState<Activity[]>(LOCAL_ACTIVITIES_BY_CATEGORY['popular'])
-  const [loading, setLoading] = useState(false)
+  const [activities, setActivities] = useState<Activity[]>(MERGED_LOCAL_ACTIVITIES)
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 5
 
-  const handleTabClick = (id: string) => {
-    setActiveCategory(id)
-    setActivities(LOCAL_ACTIVITIES_BY_CATEGORY[id] || [])
-  }
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(activities.length / PAGE_SIZE)), [activities])
+  const pagedActivities = useMemo(
+    () => activities.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [activities, page]
+  )
 
-  // 真正调后端刷新内容
-  const handleUpdateActivities = async () => {
-    setLoading(true)
-    try {
-      const payload = {
-        cityName: '香港',
-        cityCode: 'HKG',
-        timeRange: 'this_week',
-        categoryCode: CATEGORY_CODE_MAP[activeCategory] || 'ai_recommend',
-        pageNumber: 1,
-        pageSize: 5,
-      }
+  const goPrev = () => setPage((p) => Math.max(1, p - 1))
+  const goNext = () => setPage((p) => Math.min(totalPages, p + 1))
 
-      const res = await fetch(`${BASE_API}/activity/list`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) throw new Error(`activity/list HTTP ${res.status}`)
-      const data = await res.json()
-
-      const newActivities: Activity[] = (data.items || []).map((item: any) => ({
-        id: item.activityId,
-        title: item.title,
-        link: '#',
-        hot: true,
-      }))
-
-      if (newActivities.length) {
-        setActivities(newActivities)
-      }
-    } catch (err) {
-      console.error('Failed to fetch activities from backend, fallback to local data.', err)
-      // 失败时继续用本地数据
-      setActivities(LOCAL_ACTIVITIES_BY_CATEGORY[activeCategory] || [])
-    } finally {
-      setLoading(false)
+  // 注册外部 setter
+  useEffect(() => {
+    externalSetter = (items: Activity[]) => {
+      setActivities(items)
+      setPage(1)
     }
-  }
+    return () => {
+      externalSetter = null
+    }
+  }, [])
 
   return (
     <div className="hot-activity-section">
@@ -123,22 +91,9 @@ export default function HotActivity() {
         </select>
       </div>
 
-      {/* 分类标签 */}
-      <div className="category-tabs">
-        {CATEGORIES.map((cat) => (
-          <button
-            key={cat.id}
-            className={`category-tab ${activeCategory === cat.id ? 'active' : ''}`}
-            onClick={() => handleTabClick(cat.id)}
-          >
-            {cat.label}
-          </button>
-        ))}
-      </div>
-
-      {/* 活动列表 */}
+      {/* 活动列表（分页后仅显示当前页） */}
       <div className="news-list">
-        {activities.map((activity) => (
+        {pagedActivities.map((activity) => (
           <div key={activity.id} className="news-item">
             <div className="news-content">
               {activity.hot && <span className="hot-badge">🔥</span>}
@@ -151,10 +106,29 @@ export default function HotActivity() {
         ))}
       </div>
 
-      {/* 刷新按钮：现在会真正调用后端 */}
-      <button className="btn-refresh" onClick={handleUpdateActivities} disabled={loading}>
-        {loading ? '刷新中...' : '刷新内容'}
-      </button>
+      {/* 分页控件 */}
+      <div className="pagination-container">
+        <button className="page-btn" onClick={goPrev} disabled={page === 1}>
+          ← 上一页
+        </button>
+        <div className="page-dots">
+          {Array.from({ length: totalPages }).map((_, idx) => {
+            const current = idx + 1
+            return (
+              <span
+                key={current}
+                className={`page-dot ${current === page ? 'active' : ''}`}
+                onClick={() => setPage(current)}
+              />
+            )
+          })}
+        </div>
+        <button className="page-btn" onClick={goNext} disabled={page === totalPages}>
+          下一页 →
+        </button>
+      </div>
     </div>
   )
 }
+
+// 移除旧的外部更新逻辑（已用 useEffect 注入）

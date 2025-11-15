@@ -10,8 +10,8 @@ const root = ReactDOM.createRoot(document.getElementById('root'));
 
 root.render(
   <React.StrictMode>
-    {/* 重新包上 CopilotKit，但 runtimeUrl 换成同源路径，避免 CORS */}
-    <CopilotKit runtimeUrl="/copilotkit">
+    {/* CopilotKit runtimeUrl 指向 FastAPI 后端的 CopilotKit 端点 */}
+    <CopilotKit runtimeUrl="http://localhost:8000/copilotkit_remote">
       <App />
     </CopilotKit>
   </React.StrictMode>

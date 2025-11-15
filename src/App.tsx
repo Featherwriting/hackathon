@@ -2,10 +2,11 @@ import { CopilotChat } from '@copilotkit/react-ui'
 import './App.css'
 import JourneyHeader from './components/JourneyHeader.tsx'
 import HotActivity from './components/HotActivity.tsx'
-import FeaturedSpots, { updateFeaturedSpots, type Spot } from './components/FeaturedSpots.tsx'
-import Itinerary, { updateItinerary, type DayPlan } from './components/Itinerary.tsx'
-import SocialMedia, { updateSocialPosts, type SocialPost } from './components/SocialMedia.tsx'
+import FeaturedSpots from './components/FeaturedSpots.tsx'
+import Itinerary from './components/Itinerary.tsx'
+import SocialMedia from './components/SocialMedia.tsx'
 import { useFrontendActionsSetup } from './hooks/useFrontendActionsSetup.ts'
+import { useCopilotResponseInterceptor } from './hooks/useCopilotResponseInterceptor.ts'
 
 const CHAT_SUGGESTIONS = [
   { title: '查询评价', message: '查询景点评价' },
@@ -19,19 +20,9 @@ const CHAT_SUGGESTIONS = [
 export default function App() {
   // Setup frontend actions that AI agent can call
   useFrontendActionsSetup()
-
-  // Frontend Actions - 让 Agent 能够更新前端 UI
-  const handleUpdateSpots = async (spots: Spot[]) => {
-    await updateFeaturedSpots(spots)
-  }
-
-  const handleUpdateItinerary = async (plans: DayPlan[]) => {
-    await updateItinerary(plans)
-  }
-
-  const handleUpdateSocialPosts = async (posts: SocialPost[]) => {
-    await updateSocialPosts(posts)
-  }
+  
+  // Intercept CopilotKit responses to automatically apply frontend updates
+  useCopilotResponseInterceptor()
 
   return (
     <div className="app-container">

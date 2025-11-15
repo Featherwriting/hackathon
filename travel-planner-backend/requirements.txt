@@ -1,0 +1,9 @@
+copilotkit
+fastapi
+uvicorn
+pydantic
+python-multipart
+langgraph
+openai
+httpx
+langchain-community
