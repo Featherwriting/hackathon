@@ -1,4 +1,9 @@
 import React, { useState } from 'react'
+/* 新增：导入本地图片 */
+import spotPic1 from './pic/1.png'
+import spotPic2 from './pic/2.png'
+import spotPic9 from './pic/9.png'
+import spotPic3 from './pic/3.png'
 
 export interface Spot {
   id: string
@@ -16,7 +21,7 @@ const DEFAULT_SPOTS: Spot[] = [
     rating: 4.8,
     category: '港澳大地',
     price: 200,
-    image: 'https://via.placeholder.com/300x200?text=Spot+1',
+    image: spotPic2,
   },
   {
     id: 'spot-2',
@@ -24,7 +29,7 @@ const DEFAULT_SPOTS: Spot[] = [
     rating: 4.5,
     category: '活动大地',
     price: 320,
-    image: 'https://via.placeholder.com/300x200?text=Spot+2',
+    image: spotPic9,
   },
 ]
 
@@ -89,7 +94,8 @@ export default function FeaturedSpots() {
                 rating: 4.9,
                 category: '港澳体验',
                 price: 150,
-                image: 'https://via.placeholder.com/300x200?text=Victoria+Harbor',
+                // 使用本地图片
+                image: spotPic1,
               },
               {
                 id: 'spot-1',
@@ -97,7 +103,8 @@ export default function FeaturedSpots() {
                 rating: 4.8,
                 category: '港澳大地',
                 price: 200,
-                image: 'https://via.placeholder.com/300x200?text=Spot+1+Updated',
+                // 也使用本地图片作为示例
+                image: spotPic3,
               },
             ]
             updateFeaturedSpots(mockNewSpots)

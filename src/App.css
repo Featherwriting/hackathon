@@ -32,6 +32,8 @@ body {
   display: flex;
   flex-direction: column;
   height: 90vh;
+  position: relative; /* 允许内部元素绝对定位到聊天区域底部 */
+  padding-bottom: 88px; /* 为输入区与 powered-by 预留空间，可根据需要调整 */
 }
 
 /* 右边：内容区域 */
@@ -616,6 +618,27 @@ body {
   max-height: 600px;
   overflow-y: auto;
 }
+
+/* 修改 .chat-section：允许内部绝对定位并预留底部空间，避免输入区被内容遮挡 */
+.chat-section {
+  position: relative; /* 允许内部元素绝对定位到聊天区域底部 */
+  padding-bottom: 88px; /* 为输入区与 powered-by 预留空间，可根据需要调整 */
+}
+
+/* 将 Copilot 的输入容器固定在聊天区域底部（靠上 poweredBy） */
+.copilotKitInputContainer {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  bottom: 36px; /* 输入区距底部高度，可调整 */
+  z-index: 50;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  background: transparent; /* 保持原始样式，如需遮挡可修改 */
+}
+
+
+
 
 /* 响应式设计 */
 @media (max-width: 1200px) {

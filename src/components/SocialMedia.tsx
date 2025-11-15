@@ -1,4 +1,13 @@
 import React, { useState } from 'react'
+/* 新增：导入本地图片 1-5 */
+import pic1 from './pic/1.png'
+import pic2 from './pic/2.png'
+import pic3 from './pic/3.png'
+import pic4 from './pic/4.png'
+import pic5 from './pic/5.png'
+import pic6 from './pic/6.png'
+import pic7 from './pic/7.png'
+import pic8 from './pic/8.png'
 
 export interface SocialPost {
   id: string
@@ -12,35 +21,35 @@ const DEFAULT_POSTS: SocialPost[] = [
   {
     id: 'post-1',
     title: '港澳美食探险',
-    image: 'https://via.placeholder.com/150x150?text=Food+1',
+    image: pic2, // 使用 2.png
     link: '#',
     platform: 'xiaohongshu',
   },
   {
     id: 'post-2',
     title: '维港夜景打卡',
-    image: 'https://via.placeholder.com/150x150?text=Harbor',
+    image: pic1, // 使用 1.png
     link: '#',
     platform: 'xiaohongshu',
   },
   {
     id: 'post-3',
     title: '迪士尼乐园攻略',
-    image: 'https://via.placeholder.com/150x150?text=Disney',
+    image: pic3, // 使用 3.png
     link: '#',
     platform: 'xiaohongshu',
   },
   {
     id: 'post-4',
     title: '购物街推荐',
-    image: 'https://via.placeholder.com/150x150?text=Shopping',
+    image: pic4, // 使用 4.png
     link: '#',
     platform: 'xiaohongshu',
   },
   {
     id: 'post-5',
     title: '文化艺术展览',
-    image: 'https://via.placeholder.com/150x150?text=Art',
+    image: pic5, // 使用 5.png
     link: '#',
     platform: 'xiaohongshu',
   },
@@ -103,28 +112,28 @@ export default function SocialMedia() {
               {
                 id: 'post-6',
                 title: '最新港澳景点推荐',
-                image: 'https://via.placeholder.com/150x150?text=New+1',
+                image: pic6,
+                link: '#',
+                platform: 'xiaohongshu',
+              },
+              {
+                id: 'post-2',
+                title: '美食节活动现场',
+                image: pic2,
                 link: '#',
                 platform: 'xiaohongshu',
               },
               {
                 id: 'post-7',
-                title: '美食节活动现场',
-                image: 'https://via.placeholder.com/150x150?text=New+2',
+                title: '旅行穿搭灵感',
+                image: pic7,
                 link: '#',
                 platform: 'xiaohongshu',
               },
               {
                 id: 'post-8',
-                title: '旅行穿搭灵感',
-                image: 'https://via.placeholder.com/150x150?text=New+3',
-                link: '#',
-                platform: 'xiaohongshu',
-              },
-              {
-                id: 'post-9',
                 title: '酒店豪华体验',
-                image: 'https://via.placeholder.com/150x150?text=New+4',
+                image: pic8,
                 link: '#',
                 platform: 'xiaohongshu',
               },
