@@ -10,6 +10,7 @@
 venv
 # production
 /build
+/travel-planner-backend/__pycache__
 
 # misc
 .DS_Store

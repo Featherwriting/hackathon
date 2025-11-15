@@ -14,6 +14,7 @@ from openai import OpenAI
 from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 from search_tool import search_city_hotspots
+from xiaohongshu_analyzer import analyze_xiaohongshu_media_score, format_analysis_for_user
 
 # ====== 初始化 OpenAI Client ======
 client = OpenAI()
@@ -780,6 +781,8 @@ def node_generate_plan(state: TravelPlanState) -> TravelPlanState:
 def node_refine_plan(state: TravelPlanState) -> TravelPlanState:
     """
     根据用户反馈调整行程
+    
+    新增功能：检测"媒体评分"关键词，触发小红书分析
     """
     print("[Node] Refining travel plan...")
 
@@ -792,6 +795,58 @@ def node_refine_plan(state: TravelPlanState) -> TravelPlanState:
             last_user_msg = msg.get("content", "")
             break
 
+    # ====== 新增：检测"媒体评分"关键词 ======
+    if "媒体评分" in last_user_msg or "小红书评分" in last_user_msg or "社交媒体评价" in last_user_msg:
+        print("[Node] Detected media rating request, analyzing Xiaohongshu...")
+        
+        destination = state.get("destination", "香港")
+        current_itinerary = state.get("itinerary", {})
+        
+        # 提取当前行程中的景点和餐厅
+        spots_to_analyze = []
+        
+        # 从 featured_spots 中提取（更全面）
+        featured_spots = state.get("featured_spots", [])
+        for spot in featured_spots[:5]:  # 分析前5个热门景点
+            title = spot.get("title", "")
+            category = spot.get("category", "")
+            if title and ("景点" in category or "美食" in category or "餐厅" in category):
+                spots_to_analyze.append(title)
+        
+        # 如果没有找到，从 itinerary 的 activities 中提取
+        if not spots_to_analyze:
+            for plan in current_itinerary.get("plans", [])[:2]:  # 只分析前2天
+                for activity in plan.get("activities", []):
+                    title = activity.get("title", "")
+                    if title and title not in [f"{destination} 当地午餐", f"{destination} 自由活动"]:
+                        spots_to_analyze.append(title)
+        
+        # 分析每个景点/餐厅的小红书评分
+        analysis_results = []
+        for spot_name in spots_to_analyze[:3]:  # 最多分析3个地点
+            try:
+                analysis = analyze_xiaohongshu_media_score(spot_name, destination)
+                if analysis.get("success"):
+                    formatted_text = format_analysis_for_user(analysis)
+                    analysis_results.append(formatted_text)
+            except Exception as e:
+                print(f"[Node] Error analyzing {spot_name}: {e}")
+                continue
+        
+        # 生成综合回复
+        if analysis_results:
+            assistant_message = "📱 小红书媒体评分分析报告\n\n"
+            assistant_message += "根据您当前行程中的景点/餐厅，我为您整理了小红书上的用户评价和评分：\n\n"
+            assistant_message += "\n\n---\n\n".join(analysis_results)
+            assistant_message += "\n\n如需查看更多地点的媒体评分，或者根据这些评分调整行程，请告诉我！"
+        else:
+            assistant_message = "抱歉，暂未找到相关景点/餐厅的小红书评价数据。您可以指定具体的景点名称，我会为您搜索分析。"
+        
+        messages.append({"role": "assistant", "content": assistant_message})
+        state["messages"] = messages
+        return state
+    
+    # ====== 原有行程调整逻辑 ======
     # 获取当前的行程和景点数据
     current_itinerary = state.get("itinerary", {})
     current_spots = state.get("featured_spots", [])
@@ -949,7 +1004,7 @@ def create_travel_planning_agent():
     workflow = StateGraph(TravelPlanState)
 
     # 添加节点
-    workflow.add_node("greeting", node_greeting)
+    # workflow.add_node("greeting", node_greeting)
     workflow.add_node("gather_info", node_gather_info)
     workflow.add_node("generate_plan", node_generate_plan)
     workflow.add_node("refine_plan", node_refine_plan)
