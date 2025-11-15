@@ -20,7 +20,8 @@ const CATEGORIES: Category[] = [
   { id: 'event', label: '赛事活动' },
 ]
 
-const ACTIVITIES_BY_CATEGORY: Record<string, Activity[]> = {
+// 本地初始数据（作为兜底）
+const LOCAL_ACTIVITIES_BY_CATEGORY: Record<string, Activity[]> = {
   popular: [
     { id: 'a1', title: 'BLAST香港 🔥', link: '#', hot: true },
     { id: 'a2', title: 'Mew演唱会2025香港站', link: '#' },
@@ -50,24 +51,65 @@ const ACTIVITIES_BY_CATEGORY: Record<string, Activity[]> = {
   ],
 }
 
+const BASE_API = 'http://localhost:5000/api'
+
+// 前端分类 id -> 后端 categoryCode 映射:contentReference[oaicite:4]{index=4}
+const CATEGORY_CODE_MAP: Record<string, string> = {
+  popular: 'ai_recommend',
+  holiday: 'festival',
+  ai: 'ai_recommend',
+  shopping: 'shopping',
+  event: 'sports',
+}
+
 export default function HotActivity() {
   const [activeCategory, setActiveCategory] = useState('popular')
-  const activities = ACTIVITIES_BY_CATEGORY[activeCategory] || []
+  const [activities, setActivities] = useState<Activity[]>(LOCAL_ACTIVITIES_BY_CATEGORY['popular'])
+  const [loading, setLoading] = useState(false)
 
-  // 暂时留空的 POST 函数，用于演示
+  const handleTabClick = (id: string) => {
+    setActiveCategory(id)
+    setActivities(LOCAL_ACTIVITIES_BY_CATEGORY[id] || [])
+  }
+
+  // 真正调后端刷新内容
   const handleUpdateActivities = async () => {
-    console.log('POST to update activities (disabled for demo)')
-    // const payload = { category: activeCategory }
-    // try {
-    //   const res = await fetch('https://example.com/api/activities', {
-    //     method: 'POST',
-    //     headers: { 'Content-Type': 'application/json' },
-    //     body: JSON.stringify(payload),
-    //   })
-    //   if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    // } catch (err) {
-    //   console.error('Failed to update activities:', err)
-    // }
+    setLoading(true)
+    try {
+      const payload = {
+        cityName: '香港',
+        cityCode: 'HKG',
+        timeRange: 'this_week',
+        categoryCode: CATEGORY_CODE_MAP[activeCategory] || 'ai_recommend',
+        pageNumber: 1,
+        pageSize: 5,
+      }
+
+      const res = await fetch(`${BASE_API}/activity/list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error(`activity/list HTTP ${res.status}`)
+      const data = await res.json()
+
+      const newActivities: Activity[] = (data.items || []).map((item: any) => ({
+        id: item.activityId,
+        title: item.title,
+        link: '#',
+        hot: true,
+      }))
+
+      if (newActivities.length) {
+        setActivities(newActivities)
+      }
+    } catch (err) {
+      console.error('Failed to fetch activities from backend, fallback to local data.', err)
+      // 失败时继续用本地数据
+      setActivities(LOCAL_ACTIVITIES_BY_CATEGORY[activeCategory] || [])
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -87,14 +129,14 @@ export default function HotActivity() {
           <button
             key={cat.id}
             className={`category-tab ${activeCategory === cat.id ? 'active' : ''}`}
-            onClick={() => setActiveCategory(cat.id)}
+            onClick={() => handleTabClick(cat.id)}
           >
             {cat.label}
           </button>
         ))}
       </div>
 
-      {/* 热点新闻列表 */}
+      {/* 活动列表 */}
       <div className="news-list">
         {activities.map((activity) => (
           <div key={activity.id} className="news-item">
@@ -109,9 +151,9 @@ export default function HotActivity() {
         ))}
       </div>
 
-      {/* 更新按钮（暂时禁用） */}
-      <button className="btn-refresh" onClick={handleUpdateActivities} disabled>
-        刷新内容
+      {/* 刷新按钮：现在会真正调用后端 */}
+      <button className="btn-refresh" onClick={handleUpdateActivities} disabled={loading}>
+        {loading ? '刷新中...' : '刷新内容'}
       </button>
     </div>
   )
