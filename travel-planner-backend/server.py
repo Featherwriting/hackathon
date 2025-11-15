@@ -42,6 +42,7 @@ def get_or_create_session(thread_id: str) -> TravelPlanState:
             budget="中",
             itinerary={},
             featured_spots=[],
+            city_hotspots=[],
             current_phase="greeting",
             info_complete=False
         )
@@ -60,9 +61,9 @@ async def copilotkit_chat_handler(request: Request):
         # 获取请求数据
         body = await request.body()
         data = json.loads(body)
-        
+
         print(f"[Request] Received request: {json.dumps(data, ensure_ascii=False)[:200]}...")
-        
+
         # 提取请求信息 (更健壮地处理 messages 结构)
         variables = data.get('variables', {})
         req_data = variables.get('data', {})
@@ -93,28 +94,28 @@ async def copilotkit_chat_handler(request: Request):
                 if isinstance(nested, dict) and nested.get('text'):
                     user_message = nested.get('text')
                     break
-        
+
         print(f"[Chat] User message: {user_message}")
         print(f"[Chat] Thread ID: {thread_id}")
-        
+
         # 获取或创建用户会话
         session_state = get_or_create_session(thread_id)
-        
+
         print(f"[Session] Loaded state: destination={session_state.get('destination')}, days={session_state.get('days')}, interests={session_state.get('interests')}")
-        
-        # 处理用户消息并获取 AI 响应
+
+        # 处理用户消息并获取 AI 响应（这里会在同一个请求内根据情况直接生成行程）
         updated_state, ai_response, frontend_updates = process_user_message(
             user_message,
             session_state
         )
-        
+
         # 更新会话
         sessions[thread_id] = updated_state
-        
+
         print(f"[Session] Saved state: destination={updated_state.get('destination')}, days={updated_state.get('days')}, interests={updated_state.get('interests')}")
         print(f"[Chat] AI Response: {ai_response[:100]}...")
         print(f"[Chat] Frontend Updates: {list(frontend_updates.keys())}")
-        
+
         # 如果没有 thread_id，生成一个（避免前端/测试缺少 threadId 导致的问题）
         if not thread_id:
             thread_id = f"thread-{uuid.uuid4().hex[:8]}"
@@ -122,7 +123,7 @@ async def copilotkit_chat_handler(request: Request):
         # 若 AI 未生成回复，使用友好默认文本，避免返回空 content 导致前端异常
         if not ai_response:
             ai_response = "抱歉，我暂时无法生成回复，请重试或稍后再试。"
-        
+
         # 构建 CopilotKit 格式的响应
         response = {
             "data": {
@@ -154,14 +155,14 @@ async def copilotkit_chat_handler(request: Request):
                 }
             }
         }
-        
+
         return JSONResponse(response)
-        
+
     except Exception as e:
         print(f"[Error] {str(e)}")
         import traceback
         traceback.print_exc()
-        
+
         return JSONResponse({
             "errors": [
                 {
@@ -191,7 +192,7 @@ def main():
     print(f"CopilotKit Endpoint: http://localhost:8000/copilotkit_remote")
     print(f"Health Check: http://localhost:8000/api/health")
     print("=" * 60)
-    
+
     uvicorn.run(
         "server:app",
         host="0.0.0.0",
