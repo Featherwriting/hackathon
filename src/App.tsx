@@ -10,6 +10,7 @@ import { useCopilotResponseInterceptor } from './hooks/useCopilotResponseInterce
 
 const CHAT_SUGGESTIONS = [
   { title: '查询评价', message: '媒体评分' },
+  { title: '预定机票', message: '我想预定机票' },
 ]
 
 export default function App() {

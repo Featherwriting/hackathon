@@ -4,7 +4,7 @@ LangGraph-based Travel Planning Agent
 """
 
 from typing import TypedDict
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import re
 import httpx
@@ -15,6 +15,7 @@ from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 from search_tool import search_city_hotspots
 from xiaohongshu_analyzer import analyze_xiaohongshu_media_score, format_analysis_for_user
+from flight_search import search_flights, choose_best_flight
 
 # ====== 初始化 OpenAI Client ======
 client = OpenAI()
@@ -38,6 +39,11 @@ class TravelPlanState(TypedDict):
     current_day_index: int  # 当前正在生成/改进的天数索引（0-based）
     day_approved: bool  # 当前天的行程是否已被用户确认满意
     sorted_spots: list[dict]  # 预处理后的景点列表（用于逐天分配）
+    flight_booking_phase: str  # 机票预订阶段（none/asking_date/searching/completed）
+    departure_date: str  # 出发日期
+    return_date: str  # 返回日期
+    origin_city: str  # 出发城市
+    flight_results: list[dict]  # 查询到的航班结果
 
 
 # ====== 行程规划辅助函数（智能版） ======
@@ -755,6 +761,11 @@ def node_initialize_planning(state: TravelPlanState) -> TravelPlanState:
     state["current_day_index"] = 0
     state["day_approved"] = False
 
+    # 计算旅行日期（假设从明天开始）
+    from datetime import datetime, timedelta
+    start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    end_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+
     # 生成欢迎消息
     interests_str = ",".join(interests) or "多样化"
     welcome_message = f"""
@@ -1017,6 +1028,16 @@ def node_refine_day(state: TravelPlanState) -> TravelPlanState:
         state["messages"] = messages
         return state
     
+    # ====== 新增：检测"预订机票"/"订机票"/"航班"等关键词 ======
+    flight_keywords = ["预订机票", "订机票", "买机票", "航班", "飞机票", "机票预订", "订票", "flight", "book flight"]
+    wants_flight = any(keyword in last_user_msg.lower() for keyword in flight_keywords)
+    
+    if wants_flight:
+        print("[Node] Detected flight booking request")
+        state["flight_booking_phase"] = "asking_date"
+        # 返回，让主流程调用 node_book_flight
+        return state
+    
     # ====== 当前天行程调整逻辑 ======
     current_itinerary = state.get("itinerary", {})
     destination = state.get("destination", "未知")
@@ -1095,6 +1116,208 @@ def node_refine_day(state: TravelPlanState) -> TravelPlanState:
     except Exception as e:
         print(f"[Node] Refine error: {e}")
         assistant_message = "抱歉，我在处理您的调整请求时遇到了问题。请再详细描述一下您想如何修改这天的行程？"
+
+    messages.append({"role": "assistant", "content": assistant_message})
+    state["messages"] = messages
+
+    return state
+
+
+def node_book_flight(state: TravelPlanState) -> TravelPlanState:
+    """
+    处理机票预订请求 - 询问出发日期
+    """
+    print("[Node] Handling flight booking request...")
+
+    messages = state.get("messages", [])
+    destination = state.get("destination", "")
+    days = state.get("days", 3)
+
+    # 提取用户最后的消息
+    last_user_msg = ""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            last_user_msg = msg.get("content", "")
+            break
+
+    # 尝试从用户消息中提取出发城市和日期
+    origin = state.get("origin_city", "")
+    departure_date = state.get("departure_date", "")
+
+    # 检测出发城市
+    cities = ["北京", "上海", "广州", "深圳", "杭州", "西安", "成都", "重庆", "南京", "武汉"]
+    if not origin:
+        for city in cities:
+            if city in last_user_msg and city != destination:
+                origin = city
+                state["origin_city"] = origin
+                break
+
+    # 检测日期格式 YYYY-MM-DD 或 MM月DD日
+    date_pattern = r'(\d{4})-(\d{1,2})-(\d{1,2})'
+    date_match = re.search(date_pattern, last_user_msg)
+    
+    if not date_match:
+        # 尝试匹配 "12月1日" 格式
+        cn_date_pattern = r'(\d{1,2})月(\d{1,2})日'
+        cn_match = re.search(cn_date_pattern, last_user_msg)
+        if cn_match:
+            month = cn_match.group(1).zfill(2)
+            day = cn_match.group(2).zfill(2)
+            current_year = datetime.now().year
+            departure_date = f"{current_year}-{month}-{day}"
+            state["departure_date"] = departure_date
+
+    if date_match:
+        departure_date = f"{date_match.group(1)}-{date_match.group(2).zfill(2)}-{date_match.group(3).zfill(2)}"
+        state["departure_date"] = departure_date
+
+    # 如果已有出发日期，计算返回日期并开始搜索
+    if departure_date:
+        try:
+            dep_date_obj = datetime.strptime(departure_date, "%Y-%m-%d")
+            return_date_obj = dep_date_obj + timedelta(days=days)
+            return_date = return_date_obj.strftime("%Y-%m-%d")
+            state["return_date"] = return_date
+
+            if not origin:
+                # 还需要出发城市
+                assistant_message = f"好的，您想在 {departure_date} 出发前往 {destination}。\n\n请问您从哪个城市出发？（例如：北京、上海、广州等）"
+                state["flight_booking_phase"] = "asking_origin"
+            else:
+                # 信息齐全，开始搜索
+                assistant_message = f"好的！让我为您查询 {origin} 到 {destination} 的航班：\n\n✈️ 去程：{departure_date}\n✈️ 返程：{return_date}（{days}天后）\n\n请确认信息无误"
+                state["flight_booking_phase"] = "searching"
+
+            messages.append({"role": "assistant", "content": assistant_message})
+            state["messages"] = messages
+            return state
+
+        except ValueError:
+            print(f"[Node] Invalid date format: {departure_date}")
+
+    # 如果还没有日期，询问出发日期
+    if not origin:
+        assistant_message = f"""好的，我来帮您预订机票！✈️
+
+目的地：{destination}
+行程天数：{days}天
+
+请告诉我：
+1️⃣ 您从哪个城市出发？（例如：北京、上海）
+2️⃣ 计划什么时候出发？（例如：2025-12-01 或 12月1日）"""
+    else:
+        assistant_message = f"""好的，我来帮您预订从 {origin} 到 {destination} 的机票！✈️
+
+行程天数：{days}天
+
+请告诉我您计划什么时候出发？（例如：2025-12-01 或 12月1日）
+
+我会根据您的出发日期自动计算返程日期。"""
+
+    state["flight_booking_phase"] = "asking_date"
+    messages.append({"role": "assistant", "content": assistant_message})
+    state["messages"] = messages
+
+    return state
+
+
+def node_search_flights(state: TravelPlanState) -> TravelPlanState:
+    """
+    搜索航班并展示结果
+    """
+    print("[Node] Searching for flights...")
+
+    messages = state.get("messages", [])
+    origin = state.get("origin_city", "")
+    destination = state.get("destination", "")
+    departure_date = state.get("departure_date", "")
+    return_date = state.get("return_date", "")
+    people_count = state.get("people_count", 1)
+
+    try:
+        # 搜索去程航班
+        print(f"[Flight] Searching outbound: {origin} -> {destination} on {departure_date}")
+        outbound_result = search_flights(
+            origin=origin,
+            destination=destination,
+            departure_date=departure_date,
+            adults=people_count,
+            max_results=3
+        )
+
+        outbound_flights = outbound_result.get("flights", [])
+
+        # 搜索返程航班
+        print(f"[Flight] Searching return: {destination} -> {origin} on {return_date}")
+        return_result = search_flights(
+            origin=destination,
+            destination=origin,
+            departure_date=return_date,
+            adults=people_count,
+            max_results=3
+        )
+
+        return_flights = return_result.get("flights", [])
+
+        # 选择最优航班
+        best_outbound = choose_best_flight(outbound_flights) if outbound_flights else None
+        best_return = choose_best_flight(return_flights) if return_flights else None
+
+        # 生成回复消息
+        if best_outbound or best_return:
+            assistant_message = f"🎫 为您找到以下航班推荐：\n\n"
+
+            if best_outbound:
+                assistant_message += f"✈️ **去程航班** ({origin} → {destination})\n"
+                assistant_message += f"• 航班号：{best_outbound.get('airline', '')} {best_outbound.get('flight_number', '')}\n"
+                assistant_message += f"• 出发：{best_outbound.get('departure', '未知')}\n"
+                assistant_message += f"• 到达：{best_outbound.get('arrival', '未知')}\n"
+                assistant_message += f"• 飞行时长：{best_outbound.get('duration', '未知')}\n"
+                assistant_message += f"• 价格：{best_outbound.get('price', '待查询')}\n\n"
+            else:
+                assistant_message += f"❌ 抱歉，未找到 {departure_date} 从 {origin} 到 {destination} 的航班。\n\n"
+
+            if best_return:
+                assistant_message += f"✈️ **返程航班** ({destination} → {origin})\n"
+                assistant_message += f"• 航班号：{best_return.get('airline', '')} {best_return.get('flight_number', '')}\n"
+                assistant_message += f"• 出发：{best_return.get('departure', '未知')}\n"
+                assistant_message += f"• 到达：{best_return.get('arrival', '未知')}\n"
+                assistant_message += f"• 飞行时长：{best_return.get('duration', '未知')}\n"
+                assistant_message += f"• 价格：{best_return.get('price', '待查询')}\n\n"
+            else:
+                assistant_message += f"❌ 抱歉，未找到 {return_date} 从 {destination} 到 {origin} 的航班。\n\n"
+
+            if outbound_flights or return_flights:
+                total_flights = len(outbound_flights) + len(return_flights)
+                assistant_message += f"💡 共找到 {total_flights} 个航班选项。以上是根据价格和时长推荐的最优选择。\n\n"
+                assistant_message += "如需查看更多航班或调整日期，请告诉我！"
+
+            # 保存搜索结果
+            state["flight_results"] = {
+                "outbound": outbound_flights,
+                "return": return_flights,
+                "best_outbound": best_outbound,
+                "best_return": best_return
+            }
+
+        else:
+            assistant_message = f"😔 抱歉，暂时未找到 {origin} 到 {destination} 的航班信息。\n\n"
+            assistant_message += "可能原因：\n"
+            assistant_message += "1. 该日期暂无航班\n"
+            assistant_message += "2. API 查询限制\n"
+            assistant_message += "3. 城市代码无法识别\n\n"
+            assistant_message += "建议：\n"
+            assistant_message += "• 尝试更换出发日期\n"
+            assistant_message += "• 检查城市名称拼写\n"
+            assistant_message += "• 稍后重试"
+
+        state["flight_booking_phase"] = "completed"
+
+    except Exception as e:
+        print(f"[Flight] Search error: {e}")
+        assistant_message = f"抱歉，在搜索航班时遇到了问题：{str(e)}\n\n请稍后重试或更换搜索条件。"
+        state["flight_booking_phase"] = "completed"
 
     messages.append({"role": "assistant", "content": assistant_message})
     state["messages"] = messages
@@ -1247,8 +1470,15 @@ def process_user_message(user_message: str, state: TravelPlanState) -> tuple[Tra
         if state.get("current_phase") == "generating_day":
             state = node_generate_single_day(state)
     elif current_phase == "completed":
-        # 所有行程已完成，继续处理后续请求（如媒体评分、调整等）
+        # 所有行程已完成，继续处理后续请求（如媒体评分、调整、机票预订等）
+        # 先调用 node_refine_day 检测用户意图（媒体评分、机票预订等）
         state = node_refine_day(state)
+        
+        # 检查是否需要处理机票预订（在 node_refine_day 中可能设置了 flight_booking_phase）
+        if state.get("flight_booking_phase") == "asking_date" or state.get("flight_booking_phase") == "asking_origin":
+            state = node_book_flight(state)
+        elif state.get("flight_booking_phase") == "searching":
+            state = node_search_flights(state)
     elif current_phase == "generating_plan":
         # 向后兼容：旧的 generating_plan 阶段
         state = node_generate_plan(state)
@@ -1275,5 +1505,20 @@ def process_user_message(user_message: str, state: TravelPlanState) -> tuple[Tra
             {"id": h.get("id"), "title": f"{h.get('title')} (排名{h.get('rank')})", "link": "#", "hot": True}
             for h in state.get("city_hotspots", [])
         ]
+    
+    # 更新 JourneyHeader (TripInfo)
+    if state.get("destination") and state.get("days"):
+        days = state.get("days", 3)
+        start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        end_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+        
+        frontend_updates["updateTripInfo"] = {
+            "destination": state.get("destination", ""),
+            "startDate": start_date,
+            "endDate": end_date,
+            "people": state.get("people_count", 1),
+            "budget": state.get("budget", "中"),
+            "interests": state.get("interests", [])
+        }
 
     return state, ai_response, frontend_updates

@@ -8,6 +8,7 @@ import { updateFeaturedSpots, type Spot } from '../components/FeaturedSpots.tsx'
 import { updateItinerary, type DayPlan } from '../components/Itinerary.tsx'
 import { updateSocialPosts, type SocialPost } from '../components/SocialMedia.tsx'
 import { updateHotActivities } from '../components/HotActivity.tsx'
+import { updateTripInfo, type TripInfo } from '../components/JourneyHeader.tsx'
 
 export function useCopilotResponseInterceptor() {
   useEffect(() => {
@@ -49,6 +50,11 @@ export function useCopilotResponseInterceptor() {
             if (frontendActions.updateHotActivities && Array.isArray(frontendActions.updateHotActivities)) {
               console.log('[Response Interceptor] Updating hot activities with:', frontendActions.updateHotActivities)
               updateHotActivities(frontendActions.updateHotActivities)
+            }
+
+            if (frontendActions.updateTripInfo && typeof frontendActions.updateTripInfo === 'object') {
+              console.log('[Response Interceptor] Updating trip info with:', frontendActions.updateTripInfo)
+              updateTripInfo(frontendActions.updateTripInfo as TripInfo)
             }
           }
         } catch (error) {

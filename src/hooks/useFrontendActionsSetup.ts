@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { updateFeaturedSpots, type Spot } from '../components/FeaturedSpots.tsx'
 import { updateItinerary, type DayPlan } from '../components/Itinerary.tsx'
 import { updateSocialPosts, type SocialPost } from '../components/SocialMedia.tsx'
+import { updateTripInfo, type TripInfo } from '../components/JourneyHeader.tsx'
 
 /**
  * Hook to setup frontend actions that the AI agent can call
@@ -43,6 +44,21 @@ export function useFrontendActionsSetup() {
           return { success: true, message: 'Itinerary updated' }
         } catch (error) {
           console.error('Failed to update itinerary:', error)
+          return { success: false, error: String(error) }
+        }
+      },
+
+      /**
+       * Update trip information (destination, dates, people, budget, interests)
+       * @param info - Trip information object
+       */
+      updateTripInfo: async (info: TripInfo) => {
+        try {
+          await updateTripInfo(info)
+          console.log('[Frontend Action] Updated trip info:', info)
+          return { success: true, message: 'Trip info updated' }
+        } catch (error) {
+          console.error('Failed to update trip info:', error)
           return { success: false, error: String(error) }
         }
       },
@@ -90,6 +106,9 @@ export function useFrontendActionsSetup() {
         if (updates.updateItinerary) {
           updateItinerary(updates.updateItinerary)
         }
+        if (updates.updateTripInfo) {
+          updateTripInfo(updates.updateTripInfo)
+        }
         if (updates.updateFeaturedSpots) {
           updateFeaturedSpots(updates.updateFeaturedSpots)
         }
@@ -111,6 +130,9 @@ export function useFrontendActionsSetup() {
     window.__copilotkit_apply_frontend_updates = (updates: any) => {
       if (updates?.updateItinerary) {
         updateItinerary(updates.updateItinerary)
+      }
+      if (updates?.updateTripInfo) {
+        updateTripInfo(updates.updateTripInfo)
       }
       if (updates?.updateFeaturedSpots) {
         updateFeaturedSpots(updates.updateFeaturedSpots)

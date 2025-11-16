@@ -8,22 +8,7 @@ export interface Spot {
   price: number
 }
 
-const DEFAULT_SPOTS: Spot[] = [
-  {
-    id: 'spot-1',
-    title: '港岛玩乐品尝',
-    rating: 4.8,
-    category: '港澳大地',
-    price: 200
-  },
-  {
-    id: 'spot-2',
-    title: '千岛山山上日源泉',
-    rating: 4.5,
-    category: '活动大地',
-    price: 320
-  },
-]
+const DEFAULT_SPOTS: Spot[] = []  // 空数组，完全由后端更新
 
 // 全局引用，用于外部更新景点
 let globalUpdateSpots: ((spots: Spot[]) => Promise<void>) | null = null
